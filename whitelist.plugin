@@ -1,0 +1,9 @@
+#!name=App白名单优先
+#!desc=修复广告插件误杀
+#!author=jie
+#!date=2026-04-08
+
+[Rule]
+# ===== 菜鸟裹裹 =====
+DOMAIN-SUFFIX,cainiao.com,DIRECT
+DOMAIN-KEYWORD,cainiao,DIRECT

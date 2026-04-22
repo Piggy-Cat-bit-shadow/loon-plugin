@@ -1,38 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Loon 聚合插件构建脚本
-功能：
-1. 从配置文件读取多个远程规则源
-2. 下载源内容（兼容网页文本）
-3. 识别并提取 [URL Rewrite] / [Script] / [MITM]
-4. 做保守去重
-5. 重建统一头部
-6. 输出最终插件文件
-"""
-
 from __future__ import annotations
 
 import json
 import logging
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from html import unescape
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 import requests
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config" / "sources.json"
 
 
-# -------------------------
-# 日志
-# -------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="[%(levelname)s] %(message)s"
@@ -40,9 +29,6 @@ logging.basicConfig(
 logger = logging.getLogger("loon-merge")
 
 
-# -------------------------
-# 数据结构
-# -------------------------
 @dataclass
 class ParsedPlugin:
     source_name: str
@@ -54,9 +40,6 @@ class ParsedPlugin:
     unknown_sections: List[str] = field(default_factory=list)
 
 
-# -------------------------
-# 工具函数
-# -------------------------
 def load_config(config_path: Path) -> dict:
     if not config_path.exists():
         raise FileNotFoundError(f"配置文件不存在: {config_path}")
@@ -69,9 +52,6 @@ def ensure_parent_dir(file_path: Path) -> None:
 
 
 def extract_text_from_html(html: str) -> str:
-    """
-    如果响应是 HTML 页面，尽量从 <pre> 或 <body> 中提取正文文本。
-    """
     pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", html, flags=re.I | re.S)
     if pre_match:
         text = pre_match.group(1)
@@ -100,13 +80,25 @@ def looks_like_html(text: str) -> bool:
     )
 
 
-def download_text(url: str, timeout: int = 20) -> Optional[str]:
-    """
-    下载远程文本。
-    - 尽量模拟浏览器访问
-    - 如果返回 HTML，则提取正文文本
-    - 失败时返回 None，不中断整体流程
-    """
+def looks_like_plugin_text(text: str) -> bool:
+    if not text or not text.strip():
+        return False
+    markers = [
+        "#!name=",
+        "[URL Rewrite]",
+        "[Rewrite]",
+        "[Script]",
+        "[MITM]",
+        "hostname ="
+    ]
+    return any(marker.lower() in text.lower() for marker in markers)
+
+
+def normalize_newlines(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def download_text_requests(url: str, timeout: int = 20) -> Optional[str]:
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -126,33 +118,145 @@ def download_text(url: str, timeout: int = 20) -> Optional[str]:
             resp.raise_for_status()
 
             content_type = resp.headers.get("Content-Type", "").lower()
-            text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
+            text = normalize_newlines(resp.text)
 
-            if not text.strip():
-                logger.warning("下载成功但内容为空: %s", url)
+            if not text:
+                logger.warning("requests 下载成功但内容为空: %s", url)
                 return None
 
             if "text/html" in content_type or looks_like_html(text):
                 extracted = extract_text_from_html(text)
                 if extracted.strip():
-                    logger.info("检测到网页文本，已从 HTML 中提取正文: %s", url)
+                    logger.info("requests 检测到 HTML，已提取正文: %s", url)
                     return extracted
-                logger.warning("网页存在但未能提取出有效正文: %s", url)
+                logger.warning("requests 命中 HTML，但未提取到有效正文: %s", url)
                 return None
 
-            return text.strip()
-
+            return text
     except Exception as e:
-        logger.warning("下载失败: %s | %s", url, e)
+        logger.warning("requests 下载失败: %s | %s", url, e)
         return None
 
 
+def download_text_playwright(url: str, timeout_ms: int = 30000) -> Optional[str]:
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/123.0.0.0 Safari/537.36"
+                ),
+                locale="zh-CN",
+            )
+            page = context.new_page()
+
+            logger.info("Playwright 打开页面: %s", url)
+            response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+
+            if response is not None:
+                logger.info("Playwright HTTP 状态: %s -> %s", response.status, url)
+
+            try:
+                page.wait_for_load_state("networkidle", timeout=5000)
+            except PlaywrightTimeoutError:
+                logger.info("Playwright networkidle 等待超时，继续提取正文: %s", url)
+
+            # 优先取 <pre>，其次 body.innerText
+            text = ""
+            pre_count = page.locator("pre").count()
+            if pre_count > 0:
+                chunks = []
+                for i in range(pre_count):
+                    item_text = page.locator("pre").nth(i).inner_text(timeout=3000).strip()
+                    if item_text:
+                        chunks.append(item_text)
+                text = "\n".join(chunks).strip()
+
+            if not text:
+                try:
+                    text = page.locator("body").inner_text(timeout=5000).strip()
+                except Exception:
+                    text = page.content()
+
+            browser.close()
+
+            text = normalize_newlines(text)
+            if not text:
+                logger.warning("Playwright 页面可访问但正文为空: %s", url)
+                return None
+
+            if looks_like_html(text):
+                text = extract_text_from_html(text)
+
+            if looks_like_plugin_text(text):
+                logger.info("Playwright 成功提取插件文本: %s", url)
+                return text
+
+            logger.warning("Playwright 提取到正文，但不像标准插件文本: %s", url)
+            return text or None
+
+    except Exception as e:
+        logger.warning("Playwright 抓取失败: %s | %s", url, e)
+        return None
+
+
+def load_cache_text(cache_path: Path) -> Optional[str]:
+    if not cache_path.exists():
+        return None
+    try:
+        text = normalize_newlines(cache_path.read_text(encoding="utf-8"))
+        return text if text else None
+    except Exception as e:
+        logger.warning("读取缓存失败: %s | %s", cache_path, e)
+        return None
+
+
+def save_cache_text(cache_path: Path, text: str) -> None:
+    try:
+        ensure_parent_dir(cache_path)
+        cache_path.write_text(normalize_newlines(text) + "\n", encoding="utf-8")
+        logger.info("已更新缓存: %s", cache_path)
+    except Exception as e:
+        logger.warning("写入缓存失败: %s | %s", cache_path, e)
+
+
+def get_source_text(source: dict) -> Optional[str]:
+    url = source.get("url", "").strip()
+    use_browser = bool(source.get("use_browser", False))
+    cache_rel = source.get("cache", "").strip()
+    cache_path = BASE_DIR / cache_rel if cache_rel else None
+
+    text = None
+
+    # 优先策略：
+    # use_browser=true -> 先 playwright，再 requests
+    # use_browser=false -> 先 requests，再 playwright（一般其实不会走到）
+    if use_browser:
+        logger.info("该源启用浏览器抓取优先策略。")
+        text = download_text_playwright(url)
+        if not text:
+            logger.info("浏览器抓取失败，回退 requests: %s", url)
+            text = download_text_requests(url)
+    else:
+        text = download_text_requests(url)
+
+    if text:
+        if cache_path:
+            save_cache_text(cache_path, text)
+        return text
+
+    if cache_path:
+        cached_text = load_cache_text(cache_path)
+        if cached_text:
+            logger.warning("远程拉取失败，改用本地缓存: %s", cache_path)
+            return cached_text
+
+    return None
+
+
 def normalize_line(line: str) -> str:
-    """
-    基础规范化：
-    - 去掉首尾空格
-    - 多空白压缩为单空格
-    """
     line = line.strip()
     line = re.sub(r"[ \t]+", " ", line)
     return line
@@ -164,9 +268,6 @@ def is_comment(line: str) -> bool:
 
 
 def parse_header_line(line: str) -> Optional[Tuple[str, str]]:
-    """
-    解析形如 #!name=xxx 的头部信息
-    """
     m = re.match(r"^#!\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$", line.strip())
     if m:
         return m.group(1).lower(), m.group(2).strip()
@@ -174,9 +275,6 @@ def parse_header_line(line: str) -> Optional[Tuple[str, str]]:
 
 
 def split_mitm_hostnames(raw_value: str) -> List[str]:
-    """
-    解析 hostname = %APPEND% a.com, b.com
-    """
     value = raw_value.strip()
     value = re.sub(r"^hostname\s*=\s*", "", value, flags=re.IGNORECASE).strip()
     value = re.sub(r"^%[A-Z_]+%\s*", "", value, flags=re.IGNORECASE).strip()
@@ -241,15 +339,6 @@ def looks_like_rewrite_rule(line: str) -> bool:
 
 
 def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlugin:
-    """
-    按内容结构解析 Loon 插件文本。
-    兼容：
-    - 头部 #!name= / #!desc= ...
-    - [URL Rewrite] / [Rewrite]
-    - [Script]
-    - [MITM]
-    - 段外 hostname / rewrite / script 兜底识别
-    """
     parsed = ParsedPlugin(source_name=source_name, source_url=source_url)
 
     current_section: Optional[str] = None
@@ -297,7 +386,6 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
             parsed.unknown_sections.append(f"[MITM] {line}")
             continue
 
-        # 段外兜底识别
         if looks_like_script_rule(line):
             parsed.script.append(line)
         elif looks_like_rewrite_rule(line):
@@ -308,9 +396,6 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
     return parsed
 
 
-# -------------------------
-# 去重逻辑
-# -------------------------
 def canonicalize_rewrite_rule(rule: str) -> str:
     return normalize_line(rule)
 
@@ -374,19 +459,12 @@ def dedupe_mitm_hostnames(hostnames: List[str]) -> List[str]:
     return result
 
 
-# -------------------------
-# 输出
-# -------------------------
 def build_plugin_text(
     config: dict,
     rewrite_rules: List[str],
     script_rules: List[str],
     mitm_hostnames: List[str],
-    source_summaries: List[ParsedPlugin],
 ) -> str:
-    """
-    构建最终标准 Loon 插件文本
-    """
     plugin_meta = config["plugin"]
     sources = config["sources"]
 
@@ -445,9 +523,6 @@ def write_text_if_changed(path: Path, content: str) -> bool:
     return True
 
 
-# -------------------------
-# 主流程
-# -------------------------
 def main() -> int:
     try:
         config = load_config(CONFIG_PATH)
@@ -478,9 +553,9 @@ def main() -> int:
         logger.info("正在处理源 [%d/%d]: %s", idx, len(sources), name)
         logger.info("下载地址: %s", url)
 
-        text = download_text(url)
+        text = get_source_text(source)
         if not text:
-            logger.warning("源下载失败或内容为空，跳过: %s", name)
+            logger.warning("源远程抓取失败且无可用缓存，跳过: %s", name)
             continue
 
         parsed = parse_plugin_text(text, source_name=name, source_url=url)
@@ -539,7 +614,6 @@ def main() -> int:
         rewrite_rules=final_rewrite,
         script_rules=final_script,
         mitm_hostnames=final_mitm,
-        source_summaries=all_parsed,
     )
 
     changed = write_text_if_changed(output_path, plugin_text)

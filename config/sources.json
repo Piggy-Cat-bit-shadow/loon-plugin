@@ -25,6 +25,13 @@
       "url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Loon/Advertising/Advertising.plugin",
       "use_browser": false,
       "cache": "cache/blackmatrix7-advertising.plugin"
-    }
+    },
+    {
+      "name": "local-new-added",
+      "url": "",
+      "local_file": "local/new-added.plugin",
+      "use_browser": false,
+      "cache": ""
+  }
   ]
 }

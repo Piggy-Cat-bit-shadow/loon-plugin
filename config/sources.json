@@ -1,12 +1,12 @@
 {
   "plugin": {
-    "name": "Loon 三源聚合去广告",
-    "desc": "聚合 3 个上游规则源，自动拉取、去重整合的 Loon 去广告插件",
-    "author": "your-github-name",
-    "homepage": "https://github.com/your-github-name/loon-merged-adblock",
-    "icon_url": "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Advertising.png",
-    "output": "dist/merged-adblock.plugin"
-  },
+  "name": "Advertising",
+  "desc": "聚合 3 个上游规则源，自动拉取、去重整合的 Loon 去广告插件",
+  "author": "your-github-name",
+  "homepage": "https://github.com/your-github-name/loon-merged-adblock",
+  "icon_url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/source/avatar.jpg",
+  "output": "dist/merged-adblock.plugin"
+},
   "sources": [
     {
       "name": "yfamilys-adlite",

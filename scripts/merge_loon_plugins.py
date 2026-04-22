@@ -22,6 +22,7 @@ CONFIG_PATH = BASE_DIR / "config" / "sources.json"
 
 # 源优先级：数值越大优先级越高
 SOURCE_PRIORITY = {
+    "local-new-added": 4,
     "yfamilys-adlite": 3,
     "yfamilys-adblock": 2,
     "blackmatrix7-advertising": 1,
@@ -43,6 +44,7 @@ class ParsedPlugin:
     url_rewrite: List[str] = field(default_factory=list)
     script: List[str] = field(default_factory=list)
     mitm_hostnames: List[str] = field(default_factory=list)
+    rules: List[str] = field(default_factory=list)
     unknown_sections: List[str] = field(default_factory=list)
 
 
@@ -99,6 +101,8 @@ def looks_like_plugin_text(text: str) -> bool:
         "[Rewrite]",
         "[Script]",
         "[MITM]",
+        "[Rule]",
+        "[Rules]",
         "hostname ="
     ]
     return any(marker.lower() in text.lower() for marker in markers)
@@ -233,20 +237,33 @@ def save_cache_text(cache_path: Path, text: str) -> None:
 
 def get_source_text(source: dict) -> Optional[str]:
     url = source.get("url", "").strip()
+    local_file = source.get("local_file", "").strip()
     use_browser = bool(source.get("use_browser", False))
     cache_rel = source.get("cache", "").strip()
     cache_path = BASE_DIR / cache_rel if cache_rel else None
 
+    if local_file:
+        local_path = BASE_DIR / local_file
+        if local_path.exists():
+            try:
+                text = normalize_newlines(local_path.read_text(encoding="utf-8"))
+                if text:
+                    logger.info("读取本地规则源成功: %s", local_path)
+                    return text
+            except Exception as e:
+                logger.warning("读取本地规则源失败: %s | %s", local_path, e)
+
     text = None
 
-    if use_browser:
-        logger.info("该源启用浏览器抓取优先策略。")
-        text = download_text_playwright(url)
-        if not text:
-            logger.info("浏览器抓取失败，回退 requests: %s", url)
+    if url:
+        if use_browser:
+            logger.info("该源启用浏览器抓取优先策略。")
+            text = download_text_playwright(url)
+            if not text:
+                logger.info("浏览器抓取失败，回退 requests: %s", url)
+                text = download_text_requests(url)
+        else:
             text = download_text_requests(url)
-    else:
-        text = download_text_requests(url)
 
     if text:
         if cache_path:
@@ -306,6 +323,8 @@ def normalize_section_name(name: str) -> str:
         "script": "script",
         "mitm": "mitm",
         "host": "mitm",
+        "rule": "rule",
+        "rules": "rule",
     }
     return mapping.get(s, s)
 
@@ -327,6 +346,8 @@ def looks_like_rewrite_rule(line: str) -> bool:
 
     if s.startswith("^http"):
         return True
+    if s.startswith("http://") or s.startswith("https://") or s.startswith("http?:") or s.startswith("https?:"):
+        return True
 
     lowered = s.lower()
     rewrite_keywords = [
@@ -342,6 +363,11 @@ def looks_like_rewrite_rule(line: str) -> bool:
         " body-replace ",
     ]
     return any(keyword in lowered for keyword in rewrite_keywords)
+
+
+def looks_like_rule_line(line: str) -> bool:
+    s = line.strip().lower()
+    return s.startswith("host,") or s.startswith("host-suffix,")
 
 
 def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlugin:
@@ -392,10 +418,19 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
             parsed.unknown_sections.append(f"[MITM] {line}")
             continue
 
+        if current_section == "rule":
+            if looks_like_rule_line(line):
+                parsed.rules.append(normalize_line(line))
+            else:
+                parsed.unknown_sections.append(f"[Rule] {line}")
+            continue
+
         if looks_like_script_rule(line):
             parsed.script.append(line)
         elif looks_like_rewrite_rule(line):
             parsed.url_rewrite.append(line)
+        elif looks_like_rule_line(line):
+            parsed.rules.append(normalize_line(line))
         else:
             parsed.unknown_sections.append(line)
 
@@ -511,8 +546,6 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
 
     result = [str(item["rule"]) for item in best_by_pattern.values()]
     result.extend(passthrough)
-
-    # 去除 passthrough 自身完全重复
     result = list(dict.fromkeys(result))
     return result
 
@@ -633,6 +666,7 @@ def build_plugin_text(
     rewrite_rules: List[str],
     script_rules: List[str],
     mitm_hostnames: List[str],
+    rules: List[str],
 ) -> str:
     plugin_meta = config["plugin"]
     sources = config["sources"]
@@ -648,11 +682,16 @@ def build_plugin_text(
 
     lines.append("# ============================================")
     lines.append("# 此文件由 GitHub Actions + Python 自动生成")
-    lines.append("# 三源聚合、自动拉取、按动作优先级+来源优先级去重、自动更新")
+    lines.append("# 多源聚合、自动拉取、按动作优先级+来源优先级去重、自动更新")
     lines.append("# 上游来源：")
     for item in sources:
-        lines.append(f"# - {item['name']}: {item['url']}")
-    lines.append("# 来源优先级：yfamilys-adlite > yfamilys-adblock > blackmatrix7-advertising")
+        src_url = item.get("url", "")
+        src_local = item.get("local_file", "")
+        if src_local:
+            lines.append(f"# - {item['name']}: local_file={src_local}")
+        else:
+            lines.append(f"# - {item['name']}: {src_url}")
+    lines.append("# 来源优先级：local-new-added > yfamilys-adlite > yfamilys-adblock > blackmatrix7-advertising")
     lines.append("# ============================================")
     lines.append("")
 
@@ -668,6 +707,13 @@ def build_plugin_text(
         lines.extend(script_rules)
     else:
         lines.append("# 无可用 Script 规则")
+    lines.append("")
+
+    lines.append("[Rule]")
+    if rules:
+        lines.extend(rules)
+    else:
+        lines.append("# 无可用 Rule 规则")
     lines.append("")
 
     lines.append("[MITM]")
@@ -715,26 +761,31 @@ def main() -> int:
     for idx, source in enumerate(sources, start=1):
         name = source.get("name", f"source-{idx}")
         url = source.get("url", "").strip()
+        local_file = source.get("local_file", "").strip()
 
-        if not url:
-            logger.warning("跳过空 URL 源: %s", name)
+        if not url and not local_file:
+            logger.warning("跳过空源（既无 url 也无 local_file）: %s", name)
             continue
 
         logger.info("正在处理源 [%d/%d]: %s", idx, len(sources), name)
-        logger.info("下载地址: %s", url)
+        if local_file:
+            logger.info("本地文件: %s", local_file)
+        if url:
+            logger.info("下载地址: %s", url)
 
         text = get_source_text(source)
         if not text:
-            logger.warning("源远程抓取失败且无可用缓存，跳过: %s", name)
+            logger.warning("源远程抓取失败且无可用缓存/本地文件，跳过: %s", name)
             continue
 
         parsed = parse_plugin_text(text, source_name=name, source_url=url)
 
         logger.info(
-            "解析完成 | %s | URL Rewrite=%d, Script=%d, MITM hostnames=%d, unknown=%d",
+            "解析完成 | %s | URL Rewrite=%d, Script=%d, Rule=%d, MITM hostnames=%d, unknown=%d",
             name,
             len(parsed.url_rewrite),
             len(parsed.script),
+            len(parsed.rules),
             len(parsed.mitm_hostnames),
             len(parsed.unknown_sections),
         )
@@ -755,16 +806,21 @@ def main() -> int:
     raw_rewrite: List[Tuple[str, str]] = []
     raw_script: List[Tuple[str, str]] = []
     raw_mitm: List[Tuple[str, str]] = []
+    raw_rules: List[str] = []
 
     for parsed in all_parsed:
         raw_rewrite.extend((parsed.source_name, rule) for rule in parsed.url_rewrite)
         raw_script.extend((parsed.source_name, rule) for rule in parsed.script)
         raw_mitm.extend((parsed.source_name, host) for host in parsed.mitm_hostnames)
+        raw_rules.extend(parsed.rules)
+
+    raw_rules = list(dict.fromkeys(raw_rules))
 
     logger.info(
-        "汇总完成 | 原始数量：URL Rewrite=%d, Script=%d, MITM hostnames=%d",
+        "汇总完成 | 原始数量：URL Rewrite=%d, Script=%d, Rule=%d, MITM hostnames=%d",
         len(raw_rewrite),
         len(raw_script),
+        len(raw_rules),
         len(raw_mitm),
     )
 
@@ -773,9 +829,10 @@ def main() -> int:
     final_mitm = dedupe_mitm_hostnames(raw_mitm)
 
     logger.info(
-        "去重完成 | 最终数量：URL Rewrite=%d, Script=%d, MITM hostnames=%d",
+        "去重完成 | 最终数量：URL Rewrite=%d, Script=%d, Rule=%d, MITM hostnames=%d",
         len(final_rewrite),
         len(final_script),
+        len(raw_rules),
         len(final_mitm),
     )
 
@@ -784,6 +841,7 @@ def main() -> int:
         rewrite_rules=final_rewrite,
         script_rules=final_script,
         mitm_hostnames=final_mitm,
+        rules=raw_rules,
     )
 
     changed = write_text_if_changed(output_path, plugin_text)

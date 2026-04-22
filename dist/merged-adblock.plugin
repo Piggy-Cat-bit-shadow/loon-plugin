@@ -6,11 +6,12 @@
 
 # ============================================
 # 此文件由 GitHub Actions + Python 自动生成
-# 三源聚合、自动拉取、保守去重、自动更新
+# 三源聚合、自动拉取、按动作优先级+来源优先级去重、自动更新
 # 上游来源：
 # - yfamilys-adlite: https://yfamilys.com/plugin/adlite.plugin
 # - yfamilys-adblock: https://yfamilys.com/plugin/AdBlock.plugin
 # - blackmatrix7-advertising: https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Loon/Advertising/Advertising.plugin
+# 来源优先级：yfamilys-adlite > yfamilys-adblock > blackmatrix7-advertising
 # ============================================
 
 [URL Rewrite]
@@ -522,7 +523,7 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/api\.caijingmobile\.com\/(ad|advert)\/ - reject
 ^https?:\/\/m\.caijing\.com\.cn\/startup_ad_ios\.html$ - reject
 ^https?:\/\/gw\.csdn\.net\/cms-app\/v\d+\/home_page\/open_advertisement - reject
-^https?:\/\/m\.ctrip\.com\/restapi\/soa2\/\d+\/json\/getAdsList - reject
+^https?:\/\/m\.ctrip\.com\/restapi\/soa2\/\d+\/json\/getAdsList - reject-200
 ^https?:\/\/app\.poizon\.com\/api\/v\d\/app\/advertisement\/ - reject
 ^https?:\/\/api\.douban\.com\/v\d\/app_ads\/ - reject
 ^https?:\/\/rtbapi\.douyucdn\.cn\/japi\/sign\/app\/getinfo - reject
@@ -658,7 +659,7 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/gw-passenger\.01zhuanche\.com\/gw-passenger\/zhuanche-passengerController\/notk\/passenger\/recommendADs - reject
 ^https?:\/\/image\.suning\.cn\/uimg\/ma\/ad\/ - reject
 ^https?:\/\/mpcs\.suning\.com\/mpcs\/dm\/getDmInfo - reject
-^https?:\/\/ccsp-egmas\.sf-express\.com\/cx-app-base\/base\/app\/ad\/ - reject
+^https?:\/\/ccsp-egmas\.sf-express\.com\/cx-app-base\/base\/app\/ad\/ - reject-dict
 ^https?:\/\/consumer\.fcbox\.com\/v\d\/ad\/ - reject
 ^https?:\/\/((25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(:\d+)?\/V\d\/splash\/getSplashV\d\.action$ - reject
 ^https?:\/\/snailsleep\.net\/snail\/v\d\/screen\/qn\/get\? - reject
@@ -686,12 +687,12 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/app\.variflight\.com\/ad\/ - reject
 ^https?:\/\/app\.variflight\.com\/v\d\/advert\/ - reject
 ^https?:\/\/api\.cdmcaac\.com\/ad\/ - reject
-^https?:\/\/api\.vistopia\.com\.cn\/api\/v\d\/home\/advertisement - reject
+^https?:\/\/api\.vistopia\.com\.cn\/api\/v\d\/home\/advertisement - reject-dict
 ^https?:\/\/app\.wy\.guahao\.com\/json\/white\/dayquestion\/getpopad - reject
 ^https?:\/\/overseas\.weico\.cc/portal\.php\?a=get_coopen_ads - reject
 ^https?:\/\/thor\.weidian\.com\/ares\/home\.splash\/ - reject
 ^https?:\/\/api\.wallstcn\.com\/apiv\d\/advertising\/ - reject
-^https?:\/\/api\.xiachufang\.com\/v\d\/ad/ - reject
+^https?:\/\/api\.xiachufang\.com\/v\d\/ad/ - reject-dict
 ^https?:\/\/api\.psy-1\.com\/cosleep\/startup - reject
 ^https?:\/\/portal-xunyou\.qingcdn\.com\/api\/v\d\/ios\/configs\/(splash_ad|ad_urls) - reject
 ^https?:\/\/portal-xunyou\.qingcdn\.com\/api\/v\d\/ios\/ads\/ - reject
@@ -704,7 +705,7 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/www\.xiaohongshu\.com\/api\/sns\/v\d\/system_service\/splash_config - reject
 ^https?:\/\/api\.catch\.gift\/api\/v\d\/pagead\/ - reject
 ^https?:\/\/app\.yinxiang\.com\/ads\/ - reject
-^https?:\/\/restapi\.iyunmai\.com\/api\/ios\/ad\/ - reject
+^https?:\/\/restapi\.iyunmai\.com\/api\/ios\/ad\/ - reject-200
 ^https?:\/\/api\.yizhibo\.com\/common\/api\/api_pz$ - reject
 ^https?:\/\/api\.yizhibo\.com\/common\/api\/pz$ - reject
 ^https?:\/\/api\.zhihu\.com\/commercial_api\/ - reject
@@ -724,7 +725,7 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/api\.izuiyou\.com\/ad\/ - reject
 ^https?:\/\/tiku\.zhan\.com\/Common\/newAd\/ - reject
 ^https?:\/\/webboot\.zhangyue\.com\/zycl\/api\/ad\/ - reject
-^https?:\/\/saad\.ms\.zhangyue\.net\/ad - reject
+^https?:\/\/saad\.ms\.zhangyue\.net\/ad - reject-200
 (?i)\b\.ott\.cibntv\.net\/[\w\/-]+?\.mp4\?sid= - reject
 (?i)\b\/(outadservice|ting\/preload)\/ - reject
 (?i)\b\/ad\/ - reject
@@ -942,12 +943,10 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/api\.tipsoon\.com\/api\/v\d\/top\/ad - reject-200
 ^https?:\/\/api\.touker\.com\/v2\/IAdvertisementAPI\.queryStartAdvertisement - reject
 ^https?:\/\/api\.tv\.sohu\.com\/agg\/api\/app\/config\/bootstrap - reject
-^https?:\/\/api\.vistopia\.com\.cn\/api\/v\d\/home\/advertisement - reject-dict
 ^https?:\/\/api\.waitwaitpay\.com\/\/api\/splash - reject
 ^https?:\/\/api\.wallstreetcn\.com\/apiv\d\/advertising\/ - reject
 ^https?:\/\/api\.wfdata\.club\/v2\/yesfeng\/(infoCenterAd|yesList) - reject
 ^https?:\/\/api\.wmpvp\.com\/api\/v\d\/config\/promote - reject-200
-^https?:\/\/api\.xiachufang\.com\/v\d\/ad/ - reject-dict
 ^https?:\/\/api\.xiaoheihe\.cn\/.*get_ads_info - reject-200
 ^https?:\/\/api\.xiaoyi\.com\/v5\/app\/config\?userid=.* - reject
 ^https?:\/\/api\.xiaoyi\.com\/v5\/app\/mobile\/ads - reject
@@ -1004,7 +1003,6 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/capis-slb\.didapinche\.com\/ad\/ - reject
 ^https?:\/\/carapp\.gtmc\.com\.cn\/api\/appgtmc\/homePage\/HomePageAction\/queryHomePageImg\.json - reject-200
 ^https?:\/\/careapi\.oclean\.com\/mall\/v\d\/Temporary\/SafetyGetStartAdvert - reject-200
-^https?:\/\/ccsp-egmas\.sf-express\.com\/cx-app-base\/base\/app\/ad\/ - reject-dict
 ^https?:\/\/ccsp-egmas\.sf-express\.com\/cx-app-base\/base\/app\/appVersion\/detectionUpgrade - reject-dict
 ^https?:\/\/cdn-evone-ceph\.echargenet\.com\/gw-emas-cdn - reject-200
 ^https?:\/\/cdn-evone-ceph\.echargenet\.com\/gw-emas-cdn\/63c4e3b558bb610008969f89 - reject-200
@@ -1126,7 +1124,6 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/m\.client\.10010\.com\/uniAdmsInterface\/(getHomePageAd|getWelcomeAd) - reject
 ^https?:\/\/m\.ctrip\.com\/html5\/webresource\/js\/iscroll\.js$ - reject
 ^https?:\/\/m\.ctrip\.com\/restapi\/[\w\/]+tripAds - reject
-^https?:\/\/m\.ctrip\.com\/restapi\/soa2\/\d+\/json\/getAdsList - reject-200
 ^https?:\/\/m\.ibuscloud.com\/v2\/app\/getStartPage - reject
 ^https?:\/\/m\.msyc\.cc\/app\/getBootPage\/v\d - reject-200
 ^https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do - reject-dict
@@ -1208,11 +1205,9 @@ https?:\/\/m\.sd\.10086\.cn\/zapi\/app_common\/homeWelcome\/welcome.do reject-20
 ^https?:\/\/res\.pizzahut\.com\.cn\/CRM\/phad\/apphome\/apphome - reject-200
 ^https?:\/\/res\.xiaojukeji\.com\/resapi\/activity\/get(Ruled|Preload|PasMultiNotices) - reject-200
 ^https?:\/\/res\.xiaojukeji\.com\/resapi\/activity\/mget - reject-200
-^https?:\/\/restapi\.iyunmai\.com\/api\/ios\/ad\/ - reject-200
 ^https?:\/\/rich\.kuwo\.cn\/AdService\/kaiping\/adinfo - reject
 ^https?:\/\/richmanapi\.jxedt\.com\/api\/(ad|adplus|guideplus|banadplus) - reject-200
 ^https?:\/\/s3plus\.meituan\.net\/.*\/brandcpt-vedio\/.*\?time - reject-200
-^https?:\/\/saad\.ms\.zhangyue\.net\/ad - reject-200
 ^https?:\/\/sdk\.alibaba\.com\.ailbaba\.me\/.*?\/v\d\/(version|top_notice\?|advert\?position=[^2]+) - reject-200
 ^https?:\/\/sdk\.alibaba\.com\.ailbaba\.me\/dsx\.php\/v\d\/advert\?position=[^2]+ - reject
 ^https?:\/\/sdk\.alibaba\.com\.ailbaba\.me\/dsx\.php\/v\d\/top_notice\? - reject

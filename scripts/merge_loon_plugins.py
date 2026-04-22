@@ -7,11 +7,10 @@ import json
 import logging
 import re
 import sys
-import time
 from dataclasses import dataclass, field
 from html import unescape
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import requests
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -20,6 +19,13 @@ from playwright.sync_api import sync_playwright
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config" / "sources.json"
+
+# 源优先级：数值越大优先级越高
+SOURCE_PRIORITY = {
+    "yfamilys-adlite": 3,
+    "yfamilys-adblock": 2,
+    "blackmatrix7-advertising": 1,
+}
 
 
 logging.basicConfig(
@@ -38,6 +44,10 @@ class ParsedPlugin:
     script: List[str] = field(default_factory=list)
     mitm_hostnames: List[str] = field(default_factory=list)
     unknown_sections: List[str] = field(default_factory=list)
+
+
+def get_source_priority(source_name: str) -> int:
+    return SOURCE_PRIORITY.get(source_name, 0)
 
 
 def load_config(config_path: Path) -> dict:
@@ -163,7 +173,6 @@ def download_text_playwright(url: str, timeout_ms: int = 30000) -> Optional[str]
             except PlaywrightTimeoutError:
                 logger.info("Playwright networkidle 等待超时，继续提取正文: %s", url)
 
-            # 优先取 <pre>，其次 body.innerText
             text = ""
             pre_count = page.locator("pre").count()
             if pre_count > 0:
@@ -230,9 +239,6 @@ def get_source_text(source: dict) -> Optional[str]:
 
     text = None
 
-    # 优先策略：
-    # use_browser=true -> 先 playwright，再 requests
-    # use_browser=false -> 先 requests，再 playwright（一般其实不会走到）
     if use_browser:
         logger.info("该源启用浏览器抓取优先策略。")
         text = download_text_playwright(url)
@@ -396,25 +402,126 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
     return parsed
 
 
+def parse_rewrite_rule(rule: str) -> Tuple[str, str]:
+    """
+    将 rewrite 规则拆成：
+    pattern + action
+    """
+    rule = normalize_line(rule)
+    m = re.match(r"^(.*?)\s+([A-Za-z0-9._-]+)$", rule)
+    if m:
+        pattern = m.group(1).strip()
+        action = m.group(2).strip().lower()
+        return pattern, action
+    return rule, ""
+
+
+def rewrite_action_priority(action: str) -> int:
+    """
+    数值越大优先级越高
+    """
+    priority_map = {
+        "reject-200": 100,
+        "reject-dict": 95,
+        "reject-array": 94,
+        "reject-img": 93,
+        "reject-empty": 92,
+        "reject": 90,
+        "302": 80,
+        "307": 79,
+        "header-replace": 70,
+        "body-replace": 69,
+    }
+    return priority_map.get(action.lower(), 0)
+
+
 def canonicalize_rewrite_rule(rule: str) -> str:
-    return normalize_line(rule)
+    pattern, action = parse_rewrite_rule(rule)
+    return f"{pattern} || {action}"
 
 
-def dedupe_url_rewrite(rules: List[str]) -> List[str]:
-    seen: Set[str] = set()
-    result: List[str] = []
+def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
+    """
+    URL Rewrite 去重：
+    1. 同 pattern + 同 action：按源优先级保留
+    2. 同 pattern + 不同 action：先看动作优先级，再看源优先级
+    """
+    best_by_pattern: Dict[str, Dict[str, object]] = {}
+    passthrough: List[str] = []
 
-    for rule in rules:
-        canon = canonicalize_rewrite_rule(rule)
-        if canon in seen:
+    for source_name, rule in rule_entries:
+        normalized = normalize_line(rule)
+        pattern, action = parse_rewrite_rule(normalized)
+        source_score = get_source_priority(source_name)
+
+        if not action:
+            passthrough.append(normalized)
             continue
-        seen.add(canon)
-        result.append(canon)
 
+        action_score = rewrite_action_priority(action)
+
+        if pattern not in best_by_pattern:
+            best_by_pattern[pattern] = {
+                "rule": normalized,
+                "action": action,
+                "action_score": action_score,
+                "source_name": source_name,
+                "source_score": source_score,
+            }
+            continue
+
+        existing = best_by_pattern[pattern]
+        existing_rule = str(existing["rule"])
+        existing_action = str(existing["action"])
+        existing_action_score = int(existing["action_score"])
+        existing_source_name = str(existing["source_name"])
+        existing_source_score = int(existing["source_score"])
+
+        replace = False
+
+        if action_score > existing_action_score:
+            replace = True
+        elif action_score == existing_action_score and source_score > existing_source_score:
+            replace = True
+
+        if replace:
+            logger.info(
+                "URL Rewrite 去重：保留更优规则 | %s (%s/%s) -> %s (%s/%s)",
+                existing_rule,
+                existing_action,
+                existing_source_name,
+                normalized,
+                action,
+                source_name,
+            )
+            best_by_pattern[pattern] = {
+                "rule": normalized,
+                "action": action,
+                "action_score": action_score,
+                "source_name": source_name,
+                "source_score": source_score,
+            }
+        else:
+            logger.info(
+                "URL Rewrite 去重：丢弃较弱规则 | %s (%s/%s)",
+                normalized,
+                action,
+                source_name,
+            )
+
+    result = [str(item["rule"]) for item in best_by_pattern.values()]
+    result.extend(passthrough)
+
+    # 去除 passthrough 自身完全重复
+    result = list(dict.fromkeys(result))
     return result
 
 
 def parse_script_identity(rule: str) -> str:
+    """
+    Script identity：
+    优先用 pattern + script-path
+    """
     canon = normalize_line(rule)
 
     pattern_match = re.search(r"^(.*?)\s+script-path=", canon, flags=re.IGNORECASE)
@@ -428,33 +535,95 @@ def parse_script_identity(rule: str) -> str:
     return canon
 
 
-def dedupe_script_rules(rules: List[str]) -> List[str]:
-    seen: Set[str] = set()
-    result: List[str] = []
+def dedupe_script_rules(rule_entries: List[Tuple[str, str]]) -> List[str]:
+    """
+    Script 去重：
+    同 identity 时按源优先级保留
+    """
+    best_by_identity: Dict[str, Dict[str, object]] = {}
 
-    for rule in rules:
-        identity = parse_script_identity(rule)
-        if identity in seen:
+    for source_name, rule in rule_entries:
+        normalized = normalize_line(rule)
+        identity = parse_script_identity(normalized)
+        source_score = get_source_priority(source_name)
+
+        if identity not in best_by_identity:
+            best_by_identity[identity] = {
+                "rule": normalized,
+                "source_name": source_name,
+                "source_score": source_score,
+            }
             continue
-        seen.add(identity)
-        result.append(normalize_line(rule))
 
-    return result
+        existing = best_by_identity[identity]
+        existing_rule = str(existing["rule"])
+        existing_source_name = str(existing["source_name"])
+        existing_source_score = int(existing["source_score"])
+
+        if source_score > existing_source_score:
+            logger.info(
+                "Script 去重：保留更高优先级来源 | %s (%s) -> %s (%s)",
+                existing_rule,
+                existing_source_name,
+                normalized,
+                source_name,
+            )
+            best_by_identity[identity] = {
+                "rule": normalized,
+                "source_name": source_name,
+                "source_score": source_score,
+            }
+        else:
+            logger.info(
+                "Script 去重：丢弃较低优先级来源 | %s (%s)",
+                normalized,
+                source_name,
+            )
+
+    return [str(item["rule"]) for item in best_by_identity.values()]
 
 
-def dedupe_mitm_hostnames(hostnames: List[str]) -> List[str]:
-    seen: Set[str] = set()
-    result: List[str] = []
+def dedupe_mitm_hostnames(host_entries: List[Tuple[str, str]]) -> List[str]:
+    """
+    MITM hostname 去重：
+    同 hostname 按源优先级保留记录
+    产物只输出 hostname 本身
+    """
+    best_by_host: Dict[str, Dict[str, object]] = {}
 
-    for host in hostnames:
+    for source_name, host in host_entries:
         canon = canonicalize_hostname(host)
         if not canon:
             continue
-        if canon in seen:
-            continue
-        seen.add(canon)
-        result.append(canon)
 
+        source_score = get_source_priority(source_name)
+
+        if canon not in best_by_host:
+            best_by_host[canon] = {
+                "host": canon,
+                "source_name": source_name,
+                "source_score": source_score,
+            }
+            continue
+
+        existing = best_by_host[canon]
+        existing_source_name = str(existing["source_name"])
+        existing_source_score = int(existing["source_score"])
+
+        if source_score > existing_source_score:
+            logger.info(
+                "MITM 去重：保留更高优先级来源 | %s (%s -> %s)",
+                canon,
+                existing_source_name,
+                source_name,
+            )
+            best_by_host[canon] = {
+                "host": canon,
+                "source_name": source_name,
+                "source_score": source_score,
+            }
+
+    result = [str(item["host"]) for item in best_by_host.values()]
     result.sort()
     return result
 
@@ -479,10 +648,11 @@ def build_plugin_text(
 
     lines.append("# ============================================")
     lines.append("# 此文件由 GitHub Actions + Python 自动生成")
-    lines.append("# 三源聚合、自动拉取、保守去重、自动更新")
+    lines.append("# 三源聚合、自动拉取、按动作优先级+来源优先级去重、自动更新")
     lines.append("# 上游来源：")
     for item in sources:
         lines.append(f"# - {item['name']}: {item['url']}")
+    lines.append("# 来源优先级：yfamilys-adlite > yfamilys-adblock > blackmatrix7-advertising")
     lines.append("# ============================================")
     lines.append("")
 
@@ -582,14 +752,14 @@ def main() -> int:
         logger.error("所有源均处理失败，未生成最终插件。")
         return 1
 
-    raw_rewrite: List[str] = []
-    raw_script: List[str] = []
-    raw_mitm: List[str] = []
+    raw_rewrite: List[Tuple[str, str]] = []
+    raw_script: List[Tuple[str, str]] = []
+    raw_mitm: List[Tuple[str, str]] = []
 
     for parsed in all_parsed:
-        raw_rewrite.extend(parsed.url_rewrite)
-        raw_script.extend(parsed.script)
-        raw_mitm.extend(parsed.mitm_hostnames)
+        raw_rewrite.extend((parsed.source_name, rule) for rule in parsed.url_rewrite)
+        raw_script.extend((parsed.source_name, rule) for rule in parsed.script)
+        raw_mitm.extend((parsed.source_name, host) for host in parsed.mitm_hostnames)
 
     logger.info(
         "汇总完成 | 原始数量：URL Rewrite=%d, Script=%d, MITM hostnames=%d",

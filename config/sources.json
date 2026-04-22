@@ -4,21 +4,27 @@
     "desc": "聚合 3 个上游规则源，自动拉取、去重整合的 Loon 去广告插件",
     "author": "your-github-name",
     "homepage": "https://github.com/your-github-name/loon-merged-adblock",
-    "icon_url": "https://yfamilys.com/plugin/AdBlock.plugin",
+    "icon_url": "https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Advertising.png",
     "output": "dist/merged-adblock.plugin"
   },
   "sources": [
     {
       "name": "yfamilys-adlite",
-      "url": "https://yfamilys.com/plugin/adlite.plugin"
+      "url": "https://yfamilys.com/plugin/adlite.plugin",
+      "use_browser": true,
+      "cache": "cache/yfamilys-adlite.plugin"
     },
     {
       "name": "yfamilys-adblock",
-      "url": "https://yfamilys.com/plugin/AdBlock.plugin"
+      "url": "https://yfamilys.com/plugin/AdBlock.plugin",
+      "use_browser": true,
+      "cache": "cache/yfamilys-adblock.plugin"
     },
     {
       "name": "blackmatrix7-advertising",
-      "url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Loon/Advertising/Advertising.plugin"
+      "url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Loon/Advertising/Advertising.plugin",
+      "use_browser": false,
+      "cache": "cache/blackmatrix7-advertising.plugin"
     }
   ]
 }

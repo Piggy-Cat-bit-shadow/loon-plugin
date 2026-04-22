@@ -441,14 +441,40 @@ def parse_rewrite_rule(rule: str) -> Tuple[str, str]:
     """
     将 rewrite 规则拆成：
     pattern + action
+
+    兼容：
+    - ^https?... reject
+    - ^https?... url reject
+    - "^https?..." url reject-200
+    - 'pattern' reject-dict
     """
     rule = normalize_line(rule)
-    m = re.match(r"^(.*?)\s+([A-Za-z0-9._-]+)$", rule)
+
+    if (rule.startswith('"') and rule.endswith('"')) or (rule.startswith("'") and rule.endswith("'")):
+        rule = rule[1:-1].strip()
+
+    m = re.match(r"^(.*?)\s+url\s+([A-Za-z0-9._-]+)$", rule, flags=re.IGNORECASE)
     if m:
-        pattern = m.group(1).strip()
+        pattern = m.group(1).strip().strip('"').strip("'")
         action = m.group(2).strip().lower()
         return pattern, action
-    return rule, ""
+
+    m = re.match(r"^(.*?)\s+([A-Za-z0-9._-]+)$", rule)
+    if m:
+        pattern = m.group(1).strip().strip('"').strip("'")
+        action = m.group(2).strip().lower()
+        return pattern, action
+
+    return rule.strip().strip('"').strip("'"), ""
+
+
+def normalize_rewrite_pattern(pattern: str) -> str:
+    """
+    进一步规范化 rewrite pattern，尽量把视觉等价写法压成同一个 pattern
+    """
+    pattern = pattern.strip().strip('"').strip("'")
+    pattern = re.sub(r"[ \t]+", " ", pattern)
+    return pattern
 
 
 def rewrite_action_priority(action: str) -> int:
@@ -472,6 +498,7 @@ def rewrite_action_priority(action: str) -> int:
 
 def canonicalize_rewrite_rule(rule: str) -> str:
     pattern, action = parse_rewrite_rule(rule)
+    pattern = normalize_rewrite_pattern(pattern)
     return f"{pattern} || {action}"
 
 
@@ -480,24 +507,29 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
     URL Rewrite 去重：
     1. 同 pattern + 同 action：按源优先级保留
     2. 同 pattern + 不同 action：先看动作优先级，再看源优先级
+    3. 先做强规范化，解决引号/url/空格差异导致的重复
     """
     best_by_pattern: Dict[str, Dict[str, object]] = {}
     passthrough: List[str] = []
 
     for source_name, rule in rule_entries:
-        normalized = normalize_line(rule)
-        pattern, action = parse_rewrite_rule(normalized)
+        raw_rule = normalize_line(rule)
+        pattern, action = parse_rewrite_rule(raw_rule)
+        pattern = normalize_rewrite_pattern(pattern)
         source_score = get_source_priority(source_name)
 
         if not action:
-            passthrough.append(normalized)
+            normalized_passthrough = pattern
+            if normalized_passthrough not in passthrough:
+                passthrough.append(normalized_passthrough)
             continue
 
         action_score = rewrite_action_priority(action)
+        normalized_rule = f"{pattern} {action}".strip()
 
         if pattern not in best_by_pattern:
             best_by_pattern[pattern] = {
-                "rule": normalized,
+                "rule": normalized_rule,
                 "action": action,
                 "action_score": action_score,
                 "source_name": source_name,
@@ -525,12 +557,12 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
                 existing_rule,
                 existing_action,
                 existing_source_name,
-                normalized,
+                normalized_rule,
                 action,
                 source_name,
             )
             best_by_pattern[pattern] = {
-                "rule": normalized,
+                "rule": normalized_rule,
                 "action": action,
                 "action_score": action_score,
                 "source_name": source_name,
@@ -539,7 +571,7 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
         else:
             logger.info(
                 "URL Rewrite 去重：丢弃较弱规则 | %s (%s/%s)",
-                normalized,
+                normalized_rule,
                 action,
                 source_name,
             )

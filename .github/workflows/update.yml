@@ -1,1 +1,58 @@
+name: Update merged Loon plugin
 
+on:
+  workflow_dispatch:
+  schedule:
+    # 每天 UTC 02:20 运行一次（北京时间/日本时间上午）
+    - cron: "20 2 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run merge script
+        run: |
+          python scripts/merge_loon_plugins.py
+
+      - name: Check for changes
+        id: git-check
+        run: |
+          if git diff --quiet -- dist config scripts README.md; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected."
+          fi
+
+      - name: Commit changes
+        if: steps.git-check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dist/merged-adblock.plugin
+          git commit -m "chore: update merged Loon plugin"
+
+      - name: Push changes
+        if: steps.git-check.outputs.changed == 'true'
+        run: |
+          git push

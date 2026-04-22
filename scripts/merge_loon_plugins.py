@@ -5,7 +5,7 @@
 Loon 聚合插件构建脚本
 功能：
 1. 从配置文件读取多个远程规则源
-2. 下载源内容
+2. 下载源内容（兼容网页文本）
 3. 识别并提取 [URL Rewrite] / [Script] / [MITM]
 4. 做保守去重
 5. 重建统一头部
@@ -19,6 +19,7 @@ import logging
 import re
 import sys
 from dataclasses import dataclass, field
+from html import unescape
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -67,22 +68,80 @@ def ensure_parent_dir(file_path: Path) -> None:
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def extract_text_from_html(html: str) -> str:
+    """
+    如果响应是 HTML 页面，尽量从 <pre> 或 <body> 中提取正文文本。
+    """
+    pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", html, flags=re.I | re.S)
+    if pre_match:
+        text = pre_match.group(1)
+    else:
+        body_match = re.search(r"<body[^>]*>(.*?)</body>", html, flags=re.I | re.S)
+        text = body_match.group(1) if body_match else html
+
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"</p\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"</div\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"</li\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = unescape(text)
+
+    lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    return "\n".join(lines).strip()
+
+
+def looks_like_html(text: str) -> bool:
+    s = text.lstrip().lower()
+    return (
+        s.startswith("<!doctype html")
+        or s.startswith("<html")
+        or "<body" in s
+        or "<pre" in s
+    )
+
+
 def download_text(url: str, timeout: int = 20) -> Optional[str]:
     """
     下载远程文本。
-    失败时返回 None，不抛异常，便于流程继续。
+    - 尽量模拟浏览器访问
+    - 如果返回 HTML，则提取正文文本
+    - 失败时返回 None，不中断整体流程
     """
     headers = {
-        "User-Agent": "Mozilla/5.0 (GitHub Actions; Loon Plugin Merger)"
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/plain,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Referer": "https://yfamilys.com/",
     }
+
     try:
-        resp = requests.get(url, headers=headers, timeout=timeout)
-        resp.raise_for_status()
-        text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
-        if not text.strip():
-            logger.warning("下载成功但内容为空: %s", url)
-            return None
-        return text
+        with requests.Session() as session:
+            resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+            resp.raise_for_status()
+
+            content_type = resp.headers.get("Content-Type", "").lower()
+            text = resp.text.replace("\r\n", "\n").replace("\r", "\n")
+
+            if not text.strip():
+                logger.warning("下载成功但内容为空: %s", url)
+                return None
+
+            if "text/html" in content_type or looks_like_html(text):
+                extracted = extract_text_from_html(text)
+                if extracted.strip():
+                    logger.info("检测到网页文本，已从 HTML 中提取正文: %s", url)
+                    return extracted
+                logger.warning("网页存在但未能提取出有效正文: %s", url)
+                return None
+
+            return text.strip()
+
     except Exception as e:
         logger.warning("下载失败: %s | %s", url, e)
         return None
@@ -92,10 +151,9 @@ def normalize_line(line: str) -> str:
     """
     基础规范化：
     - 去掉首尾空格
-    - 多空白压缩为单空格（尽量不破坏正则主体）
+    - 多空白压缩为单空格
     """
     line = line.strip()
-    # 对普通规则做轻微空白规范化
     line = re.sub(r"[ \t]+", " ", line)
     return line
 
@@ -120,12 +178,8 @@ def split_mitm_hostnames(raw_value: str) -> List[str]:
     解析 hostname = %APPEND% a.com, b.com
     """
     value = raw_value.strip()
-
-    # 去掉 hostname =
     value = re.sub(r"^hostname\s*=\s*", "", value, flags=re.IGNORECASE).strip()
-
-    # 去掉 %APPEND% / %INSERT% 之类控制字
-    value = re.sub(r"^%[A-Z]+%\s*", "", value, flags=re.IGNORECASE).strip()
+    value = re.sub(r"^%[A-Z_]+%\s*", "", value, flags=re.IGNORECASE).strip()
 
     items = []
     for part in value.split(","):
@@ -139,14 +193,62 @@ def canonicalize_hostname(host: str) -> str:
     return host.strip().lower()
 
 
+def normalize_section_name(name: str) -> str:
+    s = name.strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    mapping = {
+        "url rewrite": "url rewrite",
+        "rewrite": "url rewrite",
+        "script": "script",
+        "mitm": "mitm",
+        "host": "mitm",
+    }
+    return mapping.get(s, s)
+
+
+def looks_like_script_rule(line: str) -> bool:
+    s = line.strip().lower()
+    return (
+        "script-path=" in s
+        or s.startswith("http-response ")
+        or s.startswith("http-request ")
+        or s.startswith("cron ")
+    )
+
+
+def looks_like_rewrite_rule(line: str) -> bool:
+    s = line.strip()
+    if not s or is_comment(s):
+        return False
+
+    if s.startswith("^http"):
+        return True
+
+    lowered = s.lower()
+    rewrite_keywords = [
+        " reject",
+        " reject-200",
+        " reject-dict",
+        " reject-array",
+        " reject-img",
+        " reject-empty",
+        " 302 ",
+        " 307 ",
+        " header-replace ",
+        " body-replace ",
+    ]
+    return any(keyword in lowered for keyword in rewrite_keywords)
+
+
 def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlugin:
     """
     按内容结构解析 Loon 插件文本。
     兼容：
     - 头部 #!name= / #!desc= ...
-    - [URL Rewrite]
+    - [URL Rewrite] / [Rewrite]
     - [Script]
     - [MITM]
+    - 段外 hostname / rewrite / script 兜底识别
     """
     parsed = ParsedPlugin(source_name=source_name, source_url=source_url)
 
@@ -159,43 +261,49 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
         if not line:
             continue
 
-        # 头部
         header = parse_header_line(line)
         if header:
             k, v = header
             parsed.headers[k] = v
             continue
 
-        # 段落识别
         section_match = re.match(r"^\[(.+?)\]$", line)
         if section_match:
-            section_name = section_match.group(1).strip().lower()
-            current_section = section_name
+            current_section = normalize_section_name(section_match.group(1))
             continue
 
-        # 注释跳过
         if is_comment(line):
             continue
 
-        # 按段落处理
+        if re.match(r"^hostname\s*=", line, flags=re.IGNORECASE):
+            parsed.mitm_hostnames.extend(split_mitm_hostnames(line))
+            continue
+
         if current_section == "url rewrite":
-            parsed.url_rewrite.append(line)
-        elif current_section == "script":
+            if looks_like_rewrite_rule(line):
+                parsed.url_rewrite.append(line)
+            else:
+                parsed.unknown_sections.append(f"[URL Rewrite] {line}")
+            continue
+
+        if current_section == "script":
+            if looks_like_script_rule(line):
+                parsed.script.append(line)
+            else:
+                parsed.unknown_sections.append(f"[Script] {line}")
+            continue
+
+        if current_section == "mitm":
+            parsed.unknown_sections.append(f"[MITM] {line}")
+            continue
+
+        # 段外兜底识别
+        if looks_like_script_rule(line):
             parsed.script.append(line)
-        elif current_section == "mitm":
-            if re.match(r"^hostname\s*=", line, flags=re.IGNORECASE):
-                parsed.mitm_hostnames.extend(split_mitm_hostnames(line))
-            else:
-                # MITM 段里非 hostname 行，保守记录
-                parsed.unknown_sections.append(f"[MITM] {line}")
+        elif looks_like_rewrite_rule(line):
+            parsed.url_rewrite.append(line)
         else:
-            # 对于不在明确段落中的行，做一次保守识别：
-            # 某些源可能把 hostname 行放得不太规整
-            if re.match(r"^hostname\s*=", line, flags=re.IGNORECASE):
-                parsed.mitm_hostnames.extend(split_mitm_hostnames(line))
-            else:
-                # 记录未知内容，不直接失败
-                parsed.unknown_sections.append(line)
+            parsed.unknown_sections.append(line)
 
     return parsed
 
@@ -204,12 +312,6 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
 # 去重逻辑
 # -------------------------
 def canonicalize_rewrite_rule(rule: str) -> str:
-    """
-    URL Rewrite 的保守规范化：
-    - 压缩空格
-    - reject / reject-200 / reject-dict 等动作保留原样
-    - 不做激进正则改写
-    """
     return normalize_line(rule)
 
 
@@ -228,11 +330,6 @@ def dedupe_url_rewrite(rules: List[str]) -> List[str]:
 
 
 def parse_script_identity(rule: str) -> str:
-    """
-    Script 规则的保守唯一标识：
-    - 完整规范化后优先
-    - 尽量提取 pattern + script-path 形成更稳定 identity
-    """
     canon = normalize_line(rule)
 
     pattern_match = re.search(r"^(.*?)\s+script-path=", canon, flags=re.IGNORECASE)
@@ -280,11 +377,13 @@ def dedupe_mitm_hostnames(hostnames: List[str]) -> List[str]:
 # -------------------------
 # 输出
 # -------------------------
-def build_plugin_text(config: dict,
-                      rewrite_rules: List[str],
-                      script_rules: List[str],
-                      mitm_hostnames: List[str],
-                      source_summaries: List[ParsedPlugin]) -> str:
+def build_plugin_text(
+    config: dict,
+    rewrite_rules: List[str],
+    script_rules: List[str],
+    mitm_hostnames: List[str],
+    source_summaries: List[ParsedPlugin],
+) -> str:
     """
     构建最终标准 Loon 插件文本
     """
@@ -293,7 +392,6 @@ def build_plugin_text(config: dict,
 
     lines: List[str] = []
 
-    # 统一头部
     lines.append(f"#!name={plugin_meta['name']}")
     lines.append(f"#!desc={plugin_meta['desc']}")
     lines.append(f"#!author={plugin_meta['author']}")
@@ -301,7 +399,6 @@ def build_plugin_text(config: dict,
     lines.append(f"#!icon={plugin_meta['icon_url']}")
     lines.append("")
 
-    # 说明注释
     lines.append("# ============================================")
     lines.append("# 此文件由 GitHub Actions + Python 自动生成")
     lines.append("# 三源聚合、自动拉取、保守去重、自动更新")
@@ -311,7 +408,6 @@ def build_plugin_text(config: dict,
     lines.append("# ============================================")
     lines.append("")
 
-    # URL Rewrite
     lines.append("[URL Rewrite]")
     if rewrite_rules:
         lines.extend(rewrite_rules)
@@ -319,7 +415,6 @@ def build_plugin_text(config: dict,
         lines.append("# 无可用 URL Rewrite 规则")
     lines.append("")
 
-    # Script
     lines.append("[Script]")
     if script_rules:
         lines.extend(script_rules)
@@ -327,7 +422,6 @@ def build_plugin_text(config: dict,
         lines.append("# 无可用 Script 规则")
     lines.append("")
 
-    # MITM
     lines.append("[MITM]")
     if mitm_hostnames:
         lines.append(f"hostname = %APPEND% {', '.join(mitm_hostnames)}")
@@ -339,9 +433,6 @@ def build_plugin_text(config: dict,
 
 
 def write_text_if_changed(path: Path, content: str) -> bool:
-    """
-    写入文件；返回是否发生变化
-    """
     old_content = None
     if path.exists():
         old_content = path.read_text(encoding="utf-8")
@@ -407,7 +498,7 @@ def main() -> int:
             logger.warning(
                 "源 %s 存在未识别/未归类内容 %d 条，已保守忽略。",
                 name,
-                len(parsed.unknown_sections)
+                len(parsed.unknown_sections),
             )
 
         all_parsed.append(parsed)
@@ -416,7 +507,6 @@ def main() -> int:
         logger.error("所有源均处理失败，未生成最终插件。")
         return 1
 
-    # 汇总
     raw_rewrite: List[str] = []
     raw_script: List[str] = []
     raw_mitm: List[str] = []
@@ -433,7 +523,6 @@ def main() -> int:
         len(raw_mitm),
     )
 
-    # 去重
     final_rewrite = dedupe_url_rewrite(raw_rewrite)
     final_script = dedupe_script_rules(raw_script)
     final_mitm = dedupe_mitm_hostnames(raw_mitm)
@@ -445,7 +534,6 @@ def main() -> int:
         len(final_mitm),
     )
 
-    # 生成文本
     plugin_text = build_plugin_text(
         config=config,
         rewrite_rules=final_rewrite,

@@ -6,7 +6,7 @@
 
 # ============================================
 # 此文件由 GitHub Actions + Python 自动生成
-# 多源聚合、自动拉取、按动作优先级+来源优先级去重、自动更新
+# 多源聚合、自动拉取、自动更新
 # 上游来源：
 # - yfamilys-adlite: https://yfamilys.com/plugin/adlite.plugin
 # - yfamilys-adblock: https://yfamilys.com/plugin/AdBlock.plugin

@@ -1,22 +1,37 @@
 {
   "plugin": {
     "name": "Advertising",
-    "desc": "聚合 6 个上游规则源，自动拉取、去重整合的 Loon 去广告插件",
+    "desc": "聚合多个规则源，自动拉取、去重整合的 Loon 去广告插件",
     "author": "Piggy-Cat-bit-shadow",
     "homepage": "https://github.com/Piggy-Cat-bit-shadow/loon-merged-adblock",
     "icon_url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/source/avatar.jpg",
-    "output": "dist/merged-adblock.plugin"
+    "output": "dist/merged-adblock.plugin",
+    "include_script": false
   },
   "sources": [
     {
+      "name": "local-new-added",
+      "enabled": true,
+      "priority": 6,
+      "url": "",
+      "local_file": "local/new-added.plugin",
+      "use_browser": false,
+      "cache": "",
+      "include_script": true
+    },
+    {
       "name": "yfamilys-adlite",
+      "enabled": true,
+      "priority": 5,
       "url": "https://yfamilys.com/plugin/adlite.plugin",
       "use_browser": true,
       "cache": "cache/yfamilys-adlite.plugin",
-      "include_script": false
+      "include_script": true
     },
     {
       "name": "yfamilys-adultraplus",
+      "enabled": false,
+      "priority": 4,
       "url": "https://yfamilys.com/plugin/adultraplus.plugin",
       "use_browser": true,
       "cache": "cache/yfamilys-adultraplus.plugin",
@@ -24,31 +39,29 @@
     },
     {
       "name": "yfamilys-adblock",
+      "enabled": true,
+      "priority": 3,
       "url": "https://yfamilys.com/plugin/AdBlock.plugin",
       "use_browser": true,
       "cache": "cache/yfamilys-adblock.plugin",
       "include_script": true
     },
     {
-      "name": "blackmatrix7-advertising",
-      "url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Loon/Advertising/Advertising.plugin",
-      "use_browser": false,
-      "cache": "cache/blackmatrix7-advertising.plugin",
-      "include_script": true
-    },
-    {
       "name": "fmz200-blockads",
+      "enabled": true,
+      "priority": 2,
       "url": "https://raw.githubusercontent.com/fmz200/wool_scripts/main/Loon/plugin/blockAds.plugin",
       "use_browser": false,
       "cache": "cache/fmz200-blockads.plugin",
       "include_script": false
     },
     {
-      "name": "local-new-added",
-      "url": "",
-      "local_file": "local/new-added.plugin",
+      "name": "blackmatrix7-advertising",
+      "enabled": true,
+      "priority": 1,
+      "url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Loon/Advertising/Advertising.plugin",
       "use_browser": false,
-      "cache": "",
+      "cache": "cache/blackmatrix7-advertising.plugin",
       "include_script": true
     }
   ]

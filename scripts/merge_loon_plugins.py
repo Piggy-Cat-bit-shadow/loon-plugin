@@ -21,8 +21,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config" / "sources.json"
 
 SOURCE_PRIORITY = {
-    "local-new-added": 5,
-    "yfamilys-adlite": 4,
+    "local-new-added": 6,
+    "yfamilys-adlite": 5,
+    "yfamilys-adultraplus": 4,
     "yfamilys-adblock": 3,
     "fmz200-blockads": 2,
     "blackmatrix7-advertising": 1,
@@ -63,14 +64,16 @@ def get_source_priority(source_name: str) -> int:
 
 
 def source_include_script(source_name: str, config: dict) -> bool:
-    """
-    判断某个源是否启用 Script。
-    默认启用；只有 include_script=false 时才关闭。
-    """
     for source in config.get("sources", []):
         if source.get("name") == source_name:
             return bool(source.get("include_script", True))
     return True
+
+
+def calc_reduce_stats(before: int, after: int) -> str:
+    removed = before - after
+    percent = 0.0 if before <= 0 else removed / before * 100
+    return f"原始={before}, 最终={after}, 去重={removed}, 去重率={percent:.2f}%"
 
 
 def normalize_newlines(text: str) -> str:
@@ -392,22 +395,6 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
 
 
 def parse_rewrite_rule(rule: str) -> Tuple[str, str]:
-    """
-    兼容常见 Rewrite 写法：
-    - pattern reject
-    - pattern - reject
-    - pattern -reject
-    - pattern reject-200
-    - pattern - reject-200
-    - pattern -reject-200
-    - pattern reject-dict
-    - pattern - reject-dict
-    - pattern -reject-dict
-    - pattern url reject
-    - pattern url - reject
-    - pattern url -reject
-    - "pattern" url reject-200
-    """
     rule = normalize_line(rule).strip()
 
     if (rule.startswith('"') and rule.endswith('"')) or (rule.startswith("'") and rule.endswith("'")):
@@ -435,16 +422,6 @@ def parse_rewrite_rule(rule: str) -> Tuple[str, str]:
 
     m = re.match(
         rf"^(.*?)\s+{ACTION_REGEX}$",
-        rule,
-        flags=re.IGNORECASE,
-    )
-    if m:
-        pattern = m.group(1).strip().strip('"').strip("'")
-        action = m.group(2).strip().lower()
-        return pattern, action
-
-    m = re.match(
-        rf"^(.*?)-({ACTION_REGEX})$",
         rule,
         flags=re.IGNORECASE,
     )
@@ -494,12 +471,9 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
         old_action_score = int(old["action_score"])
         old_source_score = int(old["source_score"])
 
-        replace = False
-
-        if action_score > old_action_score:
-            replace = True
-        elif action_score == old_action_score and source_score > old_source_score:
-            replace = True
+        replace = action_score > old_action_score or (
+            action_score == old_action_score and source_score > old_source_score
+        )
 
         if replace:
             logger.info(
@@ -664,7 +638,7 @@ def build_plugin_text(
                 f"# - {item['name']}: {src_url} | include_script={include_script}"
             )
 
-    lines.append("# 来源优先级：local-new-added > yfamilys-adlite > yfamilys-adblock > fmz200-blockads > blackmatrix7-advertising")
+    lines.append("# 来源优先级：local-new-added > yfamilys-adlite > yfamilys-adultraplus > yfamilys-adblock > fmz200-blockads > blackmatrix7-advertising")
     lines.append("# ============================================")
     lines.append("")
 
@@ -780,13 +754,14 @@ def main() -> int:
         raw_mitm.extend((parsed.source_name, host) for host in parsed.mitm_hostnames)
         raw_rules.extend(parsed.rules)
 
+    raw_rules_before = len(raw_rules)
     raw_rules = list(dict.fromkeys(raw_rules))
 
     logger.info(
         "汇总完成 | 原始数量：URL Rewrite=%d, Script=%d, Rule=%d, MITM hostnames=%d",
         len(raw_rewrite),
         len(raw_script),
-        len(raw_rules),
+        raw_rules_before,
         len(raw_mitm),
     )
 
@@ -794,13 +769,15 @@ def main() -> int:
     final_script = dedupe_script_rules(raw_script)
     final_mitm = dedupe_mitm_hostnames(raw_mitm)
 
-    logger.info(
-        "去重完成 | 最终数量：URL Rewrite=%d, Script=%d, Rule=%d, MITM hostnames=%d",
-        len(final_rewrite),
-        len(final_script),
-        len(raw_rules),
-        len(final_mitm),
-    )
+    logger.info("去重完成 | URL Rewrite | %s", calc_reduce_stats(len(raw_rewrite), len(final_rewrite)))
+    logger.info("去重完成 | Script      | %s", calc_reduce_stats(len(raw_script), len(final_script)))
+    logger.info("去重完成 | Rule        | %s", calc_reduce_stats(raw_rules_before, len(raw_rules)))
+    logger.info("去重完成 | MITM        | %s", calc_reduce_stats(len(raw_mitm), len(final_mitm)))
+
+    total_before = len(raw_rewrite) + len(raw_script) + raw_rules_before + len(raw_mitm)
+    total_after = len(final_rewrite) + len(final_script) + len(raw_rules) + len(final_mitm)
+
+    logger.info("去重完成 | 总计        | %s", calc_reduce_stats(total_before, total_after))
 
     plugin_text = build_plugin_text(
         config=config,

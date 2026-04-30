@@ -10,10 +10,10 @@
   "sources": [
     {
       "name": "yfamilys-adlite",
-      "url": "https://yfamilys.com/plugin/adultraplus.plugin",
+      "url": "https://yfamilys.com/plugin/adlite.plugin",
       "use_browser": true,
       "cache": "cache/yfamilys-adlite.plugin",
-      "include_script": false
+      "include_script": true
     },
     {
       "name": "yfamilys-adblock",

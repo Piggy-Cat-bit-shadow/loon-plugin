@@ -2148,6 +2148,36 @@ https://.+\.gamersky.com/v1/statisticAd reject-dict
 ^https?:\/\/zjh5api\.189smarthome\.com:\d+\/xygj-config-api\/queryData reject
 ^https?:\/\/zlsdk\.1rtb\.net\/sdk\/req_ad\? reject-200
 
+[Script]
+http-response ^https?:\/\/api\.369cx\.cn\/v\d\/Splash\/GetSplashAd requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/dict.js
+http-response ^https?:\/\/[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+){1,4}(:\d+)?\/api\/v\d\/movie\/index_recommend requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/555Ad.js
+http-response ^https?:\/\/www\.123pan\.com\/s\/[0-9a-zA-Z=_/-]+\.html requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/123pan.js
+http-response ^https?:\/\/ad\.12306\.cn\/ad\/ser\/getAdList requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/12306.js
+http-response ^http:\/\/[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+){1,4}(:\d+)?\/amdc\/mobileDispatch requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/amdc.js
+http-response ^https?:\/\/.*(xbwpys|ahhhhfs)\.com\/($|[0-9a-zA-Z_/]+\/$) requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/ahfs.js
+http-response ^https:\/\/newclient\.map\.baidu\.com\/client\/phpui2\/\?qt=ads requires-body=1,script-path=https://raw.githubusercontent.com/app2smile/rules/master/js/baidumap.js
+http-response ^https?:\/\/bp-api\.bestv\.com\.cn\/cms\/api\/audit\/home\/getCommonMixData requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/master/baishitv.js
+http-response ^https?:\/\/gg\.caixin\.com\/s\?z=caixin&op=1&c=3362 requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/caixinads.js
+http-response ^https?:\/\/.*flyert.*\/source\/plugin\/mobile\/mobile\.php\?module=threadpost&.+?&page=1 requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/fly.js
+http-response ^https?:\/\/.*umetrip\.com\.cn\/gateway\/api\/umetrip\/native$ url script-response-header https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/hanglvzongheng.js
+http-response ^https?:\/\/.*cupid\.iqiyi\.com\/mixer\? requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/iqiyi_open_ads.js
+http-response ^https?:\/\/napi\.ithome\.com\/api\/news\/indexv\d\/iphone requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/ithome.js
+http-response ^https?:\/\/api\.m\.jd\.com\/api\?functionId=delivery_show requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/startup.js
+http-response ^https?:\/\/api\.m\.jd\.com\/client\.action\?functionId=(hotWords|hotSearchTerms) requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/jd_json.js
+http-response ^https?:\/\/api\.coolapk\.com\/v6\/(feed\/(replyList|detail)|main\/indexV8|dataList) requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/coolapk.js
+http-response ^https?:\/\/api.coolapk.com\/v6\/main\/init requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/coolapk.js
+http-response ^https?:\/\/open-cms-api\.(uc|quark)\.cn\/open-cms requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/master/quark.js
+http-response ^https?:\/\/mobilepaas\.abchina\.com\.cn:441\/mgw\.htm url script-response-header https://raw.githubusercontent.com/ddgksf2013/Scripts/master/abchina.js
+http-response ^https?:\/\/j1\.pupuapi\.com\/client\/marketing\/banner\/v\d\?position requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/master/pupumarket.js
+http-response ^https?:\/\/api\.jk\.cn\/m\.api url script-response-header https://raw.githubusercontent.com/ddgksf2013/Scripts/master/pinganads.js
+http-response ^https?:\/\/apps\.teamair\.cn\/app\/version requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/qidian.js
+http-response https://ccsp-egmas.sf-express.com/cx-app-base/base/app/ad/queryInfoFlow requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/shunfeng_json.js
+http-response ^https?:\/\/api\.shenyin\.name\/stay-fork\/browse\/featured$ requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/stay.js
+http-response ^https?:\/\/.*zdmimg\.com\/cpm\/api\/v\d\/advert_distribution\/get_all_advertise requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/smzdm_json.js
+http-response ^https?:\/\/apiproxy\.zuche\.com\/resource\/cardes\/toufang\/marketing requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/dict.js
+http-response ^https\:\/\/(weixin110\.qq|security.wechat)\.com\/cgi-bin\/mmspamsupport-bin\/newredirectconfirmcgi\? requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/master/weixin110.js
+http-response ^https?:\/\/api\.zhihu\.com\/commercial_api.*launch_v2 requires-body=1,script-path=https://raw.githubusercontent.com/ddgksf2013/Scripts/refs/heads/master/zhihu_openads.js
+
 [Rule]
 host, acdn.adnxs.com, reject
 host, mediation.adnxs.com, reject

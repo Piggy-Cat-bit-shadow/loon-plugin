@@ -62,6 +62,17 @@ def get_source_priority(source_name: str) -> int:
     return SOURCE_PRIORITY.get(source_name, 0)
 
 
+def source_include_script(source_name: str, config: dict) -> bool:
+    """
+    判断某个源是否启用 Script。
+    默认启用；只有 include_script=false 时才关闭。
+    """
+    for source in config.get("sources", []):
+        if source.get("name") == source_name:
+            return bool(source.get("include_script", True))
+    return True
+
+
 def normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").strip()
 
@@ -642,11 +653,16 @@ def build_plugin_text(
     for item in sources:
         src_url = item.get("url", "")
         src_local = item.get("local_file", "")
+        include_script = item.get("include_script", True)
 
         if src_local:
-            lines.append(f"# - {item['name']}: local_file={src_local}")
+            lines.append(
+                f"# - {item['name']}: local_file={src_local} | include_script={include_script}"
+            )
         else:
-            lines.append(f"# - {item['name']}: {src_url}")
+            lines.append(
+                f"# - {item['name']}: {src_url} | include_script={include_script}"
+            )
 
     lines.append("# 来源优先级：local-new-added > yfamilys-adlite > yfamilys-adblock > fmz200-blockads > blackmatrix7-advertising")
     lines.append("# ============================================")
@@ -751,7 +767,16 @@ def main() -> int:
 
     for parsed in all_parsed:
         raw_rewrite.extend((parsed.source_name, rule) for rule in parsed.url_rewrite)
-        raw_script.extend((parsed.source_name, rule) for rule in parsed.script)
+
+        if source_include_script(parsed.source_name, config):
+            raw_script.extend((parsed.source_name, rule) for rule in parsed.script)
+        else:
+            logger.info(
+                "已按配置跳过 Script | source=%s | Script=%d",
+                parsed.source_name,
+                len(parsed.script),
+            )
+
         raw_mitm.extend((parsed.source_name, host) for host in parsed.mitm_hostnames)
         raw_rules.extend(parsed.rules)
 

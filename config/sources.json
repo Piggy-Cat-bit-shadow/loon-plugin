@@ -10,7 +10,7 @@
   "sources": [
     {
       "name": "yfamilys-adlite",
-      "url": "https://yfamilys.com/plugin/adlite.plugin",
+      "url": "https://yfamilys.com/plugin/adultraplus.plugin",
       "use_browser": true,
       "cache": "cache/yfamilys-adlite.plugin",
       "include_script": true

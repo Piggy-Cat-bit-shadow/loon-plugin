@@ -20,15 +20,6 @@ from playwright.sync_api import sync_playwright
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config" / "sources.json"
 
-SOURCE_PRIORITY = {
-    "local-new-added": 6,
-    "yfamilys-adlite": 5,
-    "yfamilys-adultraplus": 4,
-    "yfamilys-adblock": 3,
-    "fmz200-blockads": 2,
-    "blackmatrix7-advertising": 1,
-}
-
 ACTION_PRIORITY = {
     "reject-200": 100,
     "reject-dict": 95,
@@ -59,14 +50,23 @@ class ParsedPlugin:
     unknown_sections: List[str] = field(default_factory=list)
 
 
-def get_source_priority(source_name: str) -> int:
-    return SOURCE_PRIORITY.get(source_name, 0)
+def get_source_priority(source_name: str, config: dict) -> int:
+    for source in config.get("sources", []):
+        if source.get("name") == source_name:
+            return int(source.get("priority", 0))
+    return 0
 
 
 def source_include_script(source_name: str, config: dict) -> bool:
+    plugin_meta = config.get("plugin", {})
+
+    if plugin_meta.get("include_script") is False:
+        return False
+
     for source in config.get("sources", []):
         if source.get("name") == source_name:
             return bool(source.get("include_script", True))
+
     return True
 
 
@@ -445,7 +445,7 @@ def canonicalize_rewrite(rule: str) -> Optional[Tuple[str, str, str]]:
     return pattern, action, normalized_rule
 
 
-def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
+def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]], config: dict) -> List[str]:
     best_by_pattern: Dict[str, Dict[str, object]] = {}
 
     for source_name, rule in rule_entries:
@@ -455,7 +455,7 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
 
         pattern, action, normalized_rule = parsed
         action_score = ACTION_PRIORITY.get(action, 0)
-        source_score = get_source_priority(source_name)
+        source_score = get_source_priority(source_name, config)
 
         if pattern not in best_by_pattern:
             best_by_pattern[pattern] = {
@@ -527,13 +527,13 @@ def parse_script_identity(rule: str) -> str:
     return canon
 
 
-def dedupe_script_rules(rule_entries: List[Tuple[str, str]]) -> List[str]:
+def dedupe_script_rules(rule_entries: List[Tuple[str, str]], config: dict) -> List[str]:
     best_by_identity: Dict[str, Dict[str, object]] = {}
 
     for source_name, rule in rule_entries:
         normalized = normalize_line(rule)
         identity = parse_script_identity(normalized)
-        source_score = get_source_priority(source_name)
+        source_score = get_source_priority(source_name, config)
 
         if identity not in best_by_identity:
             best_by_identity[identity] = {
@@ -562,7 +562,7 @@ def dedupe_script_rules(rule_entries: List[Tuple[str, str]]) -> List[str]:
     return [str(v["rule"]) for v in best_by_identity.values()]
 
 
-def dedupe_mitm_hostnames(host_entries: List[Tuple[str, str]]) -> List[str]:
+def dedupe_mitm_hostnames(host_entries: List[Tuple[str, str]], config: dict) -> List[str]:
     best_by_host: Dict[str, Dict[str, object]] = {}
 
     for source_name, host in host_entries:
@@ -570,7 +570,7 @@ def dedupe_mitm_hostnames(host_entries: List[Tuple[str, str]]) -> List[str]:
         if not canon:
             continue
 
-        source_score = get_source_priority(source_name)
+        source_score = get_source_priority(source_name, config)
 
         if canon not in best_by_host:
             best_by_host[canon] = {
@@ -624,21 +624,28 @@ def build_plugin_text(
     lines.append("# 多源聚合、自动拉取、自动更新")
     lines.append("# 上游来源：")
 
-    for item in sources:
+    enabled_sources = [s for s in sources if s.get("enabled", True) is not False]
+
+    for item in enabled_sources:
         src_url = item.get("url", "")
         src_local = item.get("local_file", "")
         include_script = item.get("include_script", True)
+        priority = item.get("priority", 0)
 
         if src_local:
             lines.append(
-                f"# - {item['name']}: local_file={src_local} | include_script={include_script}"
+                f"# - {item['name']}: local_file={src_local} | enabled=true | priority={priority} | include_script={include_script}"
             )
         else:
             lines.append(
-                f"# - {item['name']}: {src_url} | include_script={include_script}"
+                f"# - {item['name']}: {src_url} | enabled=true | priority={priority} | include_script={include_script}"
             )
 
-    lines.append("# 来源优先级：local-new-added > yfamilys-adlite > yfamilys-adultraplus > yfamilys-adblock > fmz200-blockads > blackmatrix7-advertising")
+    priority_text = " > ".join(
+        s.get("name", "unknown")
+        for s in sorted(enabled_sources, key=lambda x: int(x.get("priority", 0)), reverse=True)
+    )
+    lines.append(f"# 来源优先级：{priority_text}")
     lines.append("# ============================================")
     lines.append("")
 
@@ -646,9 +653,10 @@ def build_plugin_text(
     lines.extend(rewrite_rules or ["# 无可用 URL Rewrite 规则"])
     lines.append("")
 
-    lines.append("[Script]")
-    lines.extend(script_rules or ["# 无可用 Script 规则"])
-    lines.append("")
+    if script_rules:
+        lines.append("[Script]")
+        lines.extend(script_rules)
+        lines.append("")
 
     lines.append("[Rule]")
     lines.extend(rules or ["# 无可用 Rule 规则"])
@@ -695,6 +703,11 @@ def main() -> int:
 
     for idx, source in enumerate(sources, start=1):
         name = source.get("name", f"source-{idx}")
+
+        if source.get("enabled", True) is False:
+            logger.info("按配置跳过未启用源: %s", name)
+            continue
+
         url = source.get("url", "").strip()
         local_file = source.get("local_file", "").strip()
 
@@ -765,9 +778,9 @@ def main() -> int:
         len(raw_mitm),
     )
 
-    final_rewrite = dedupe_url_rewrite(raw_rewrite)
-    final_script = dedupe_script_rules(raw_script)
-    final_mitm = dedupe_mitm_hostnames(raw_mitm)
+    final_rewrite = dedupe_url_rewrite(raw_rewrite, config)
+    final_script = dedupe_script_rules(raw_script, config)
+    final_mitm = dedupe_mitm_hostnames(raw_mitm, config)
 
     logger.info("去重完成 | URL Rewrite | %s", calc_reduce_stats(len(raw_rewrite), len(final_rewrite)))
     logger.info("去重完成 | Script      | %s", calc_reduce_stats(len(raw_script), len(final_script)))

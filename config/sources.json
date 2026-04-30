@@ -41,7 +41,7 @@
       "url": "https://raw.githubusercontent.com/fmz200/wool_scripts/main/Loon/plugin/blockAds.plugin",
       "use_browser": false,
       "cache": "cache/fmz200-blockads.plugin",
-      "include_script": true
+      "include_script": false
     },
     {
       "name": "local-new-added",

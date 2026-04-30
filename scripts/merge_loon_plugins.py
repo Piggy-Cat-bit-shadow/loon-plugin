@@ -21,12 +21,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config" / "sources.json"
 
 SOURCE_PRIORITY = {
-
     "local-new-added": 5,
     "yfamilys-adlite": 4,
     "yfamilys-adblock": 3,
-    "blackmatrix7-advertising": 2,
-    "fmz200-blockads": 1,
+    "fmz200-blockads": 2,
+    "blackmatrix7-advertising": 1,
 }
 
 ACTION_PRIORITY = {
@@ -42,10 +41,7 @@ ACTION_PRIORITY = {
     "body-replace": 69,
 }
 
-# 所有需要识别的 rewrite action
-# 长的放前面，避免 reject 提前吃掉 reject-200 / reject-dict
 ACTION_REGEX = r"(reject-200|reject-dict|reject-array|reject-img|reject-empty|reject|302|307|header-replace|body-replace)"
-
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("loon-merge")
@@ -106,21 +102,6 @@ def looks_like_html(text: str) -> bool:
     return s.startswith("<!doctype html") or s.startswith("<html") or "<body" in s or "<pre" in s
 
 
-def looks_like_plugin_text(text: str) -> bool:
-    lower = text.lower()
-    markers = [
-        "#!name=",
-        "[url rewrite]",
-        "[rewrite]",
-        "[script]",
-        "[mitm]",
-        "[rule]",
-        "[rules]",
-        "hostname =",
-    ]
-    return any(m in lower for m in markers)
-
-
 def download_text_requests(url: str, timeout: int = 20) -> Optional[str]:
     headers = {
         "User-Agent": (
@@ -139,12 +120,17 @@ def download_text_requests(url: str, timeout: int = 20) -> Optional[str]:
         with requests.Session() as session:
             resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
             resp.raise_for_status()
+
             text = normalize_newlines(resp.text)
             if not text:
                 return None
-            if "text/html" in resp.headers.get("Content-Type", "").lower() or looks_like_html(text):
+
+            content_type = resp.headers.get("Content-Type", "").lower()
+            if "text/html" in content_type or looks_like_html(text):
                 text = extract_text_from_html(text)
+
             return text or None
+
     except Exception as e:
         logger.warning("requests 下载失败: %s | %s", url, e)
         return None
@@ -163,8 +149,8 @@ def download_text_playwright(url: str, timeout_ms: int = 30000) -> Optional[str]
                 locale="zh-CN",
             )
             page = context.new_page()
-            logger.info("Playwright 打开页面: %s", url)
 
+            logger.info("Playwright 打开页面: %s", url)
             response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             if response is not None:
                 logger.info("Playwright HTTP 状态: %s -> %s", response.status, url)
@@ -177,12 +163,13 @@ def download_text_playwright(url: str, timeout_ms: int = 30000) -> Optional[str]
             text = ""
             pre_nodes = page.locator("pre")
             count = pre_nodes.count()
+
             if count > 0:
                 chunks = []
                 for i in range(count):
-                    t = pre_nodes.nth(i).inner_text(timeout=3000).strip()
-                    if t:
-                        chunks.append(t)
+                    item_text = pre_nodes.nth(i).inner_text(timeout=3000).strip()
+                    if item_text:
+                        chunks.append(item_text)
                 text = "\n".join(chunks).strip()
 
             if not text:
@@ -192,12 +179,16 @@ def download_text_playwright(url: str, timeout_ms: int = 30000) -> Optional[str]
                     text = page.content()
 
             browser.close()
+
             text = normalize_newlines(text)
             if not text:
                 return None
+
             if looks_like_html(text):
                 text = extract_text_from_html(text)
+
             return text or None
+
     except Exception as e:
         logger.warning("Playwright 抓取失败: %s | %s", url, e)
         return None
@@ -242,6 +233,7 @@ def get_source_text(source: dict) -> Optional[str]:
                 logger.warning("读取本地规则源失败: %s | %s", local_path, e)
 
     text = None
+
     if url:
         if use_browser:
             logger.info("该源启用浏览器抓取优先策略。")
@@ -258,10 +250,10 @@ def get_source_text(source: dict) -> Optional[str]:
         return text
 
     if cache_path:
-        cached = load_cache_text(cache_path)
-        if cached:
+        cached_text = load_cache_text(cache_path)
+        if cached_text:
             logger.warning("远程拉取失败，改用本地缓存: %s", cache_path)
-            return cached
+            return cached_text
 
     return None
 
@@ -270,7 +262,7 @@ def split_mitm_hostnames(raw_value: str) -> List[str]:
     value = raw_value.strip()
     value = re.sub(r"^hostname\s*=\s*", "", value, flags=re.IGNORECASE).strip()
     value = re.sub(r"^%[A-Z_]+%\s*", "", value, flags=re.IGNORECASE).strip()
-    return [x.strip() for x in value.split(",") if x.strip()]
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def normalize_section_name(name: str) -> str:
@@ -294,7 +286,12 @@ def is_comment(line: str) -> bool:
 
 def looks_like_script_rule(line: str) -> bool:
     s = line.strip().lower()
-    return "script-path=" in s or s.startswith("http-response ") or s.startswith("http-request ") or s.startswith("cron ")
+    return (
+        "script-path=" in s
+        or s.startswith("http-response ")
+        or s.startswith("http-request ")
+        or s.startswith("cron ")
+    )
 
 
 def looks_like_rule_line(line: str) -> bool:
@@ -306,6 +303,7 @@ def looks_like_rewrite_rule(line: str) -> bool:
     s = line.strip()
     if not s or is_comment(s):
         return False
+
     lower = s.lower()
     return (
         s.startswith("^http")
@@ -329,6 +327,7 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
 
     for raw_line in text.split("\n"):
         line = raw_line.strip()
+
         if not line:
             continue
 
@@ -383,7 +382,7 @@ def parse_plugin_text(text: str, source_name: str, source_url: str) -> ParsedPlu
 
 def parse_rewrite_rule(rule: str) -> Tuple[str, str]:
     """
-    兼容所有已出现过的写法：
+    兼容常见 Rewrite 写法：
     - pattern reject
     - pattern - reject
     - pattern -reject
@@ -398,47 +397,46 @@ def parse_rewrite_rule(rule: str) -> Tuple[str, str]:
     - pattern url -reject
     - "pattern" url reject-200
     """
-    rule = normalize_line(rule)
+    rule = normalize_line(rule).strip()
 
-    # 去掉整体首尾引号
     if (rule.startswith('"') and rule.endswith('"')) or (rule.startswith("'") and rule.endswith("'")):
         rule = rule[1:-1].strip()
 
-    # 去掉 pattern 上残留的首尾引号
-    rule = rule.strip().strip('"').strip("'")
-
-    # 统一 url + 连字符变体
-    rule = re.sub(r"\s+url\s*-\s*", " url ", rule, flags=re.IGNORECASE)
-    rule = re.sub(r"\s+url\s+-([A-Za-z])", r" url \1", rule, flags=re.IGNORECASE)
-
-    # 统一 action 前面的连字符写法
-    # 例如：
-    # pattern - reject-200
-    # pattern -reject-200
-    # pattern  -   reject
-    rule = re.sub(rf"\s*-\s*{ACTION_REGEX}$", lambda m: " " + m.group(0).split("-")[-1].strip(), rule, flags=re.IGNORECASE)
-
-    # 上面那条对 reject-dict 这种会只保留 dict，不安全，所以再重新用可靠方式做一次尾部提取
-    m = re.match(rf"^(.*?)\s+url\s+{ACTION_REGEX}$", rule, flags=re.IGNORECASE)
+    m = re.match(
+        rf"^(.*?)\s+url\s+-?\s*{ACTION_REGEX}$",
+        rule,
+        flags=re.IGNORECASE,
+    )
     if m:
         pattern = m.group(1).strip().strip('"').strip("'")
         action = m.group(2).strip().lower()
         return pattern, action
 
-    m = re.match(rf"^(.*?)\s+-\s*{ACTION_REGEX}$", rule, flags=re.IGNORECASE)
+    m = re.match(
+        rf"^(.*?)\s+-\s*{ACTION_REGEX}$",
+        rule,
+        flags=re.IGNORECASE,
+    )
     if m:
         pattern = m.group(1).strip().strip('"').strip("'")
         action = m.group(2).strip().lower()
         return pattern, action
 
-    m = re.match(rf"^(.*?)\s+{ACTION_REGEX}$", rule, flags=re.IGNORECASE)
+    m = re.match(
+        rf"^(.*?)\s+{ACTION_REGEX}$",
+        rule,
+        flags=re.IGNORECASE,
+    )
     if m:
         pattern = m.group(1).strip().strip('"').strip("'")
         action = m.group(2).strip().lower()
         return pattern, action
 
-    # 兜底：处理 pattern-reject 这类极端尾部连写
-    m = re.match(rf"^(.*?)-({ACTION_REGEX})$", rule, flags=re.IGNORECASE)
+    m = re.match(
+        rf"^(.*?)-({ACTION_REGEX})$",
+        rule,
+        flags=re.IGNORECASE,
+    )
     if m:
         pattern = m.group(1).strip().strip('"').strip("'")
         action = m.group(2).strip().lower()
@@ -486,6 +484,7 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
         old_source_score = int(old["source_score"])
 
         replace = False
+
         if action_score > old_action_score:
             replace = True
         elif action_score == old_action_score and source_score > old_source_score:
@@ -494,8 +493,12 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
         if replace:
             logger.info(
                 "URL Rewrite 去重：保留更优规则 | %s (%s/%s) -> %s (%s/%s)",
-                old["rule"], old["action"], old["source_name"],
-                normalized_rule, action, source_name,
+                old["rule"],
+                old["action"],
+                old["source_name"],
+                normalized_rule,
+                action,
+                source_name,
             )
             best_by_pattern[pattern] = {
                 "rule": normalized_rule,
@@ -505,18 +508,21 @@ def dedupe_url_rewrite(rule_entries: List[Tuple[str, str]]) -> List[str]:
                 "source_score": source_score,
             }
 
-    # 最终再按 (pattern, action) 做一次绝对去重
     final_seen = set()
     final_rules = []
+
     for item in best_by_pattern.values():
         rule = str(item["rule"])
         parsed = canonicalize_rewrite(rule)
         if not parsed:
             continue
+
         pattern, action, normalized_rule = parsed
         key = (pattern, action)
+
         if key in final_seen:
             continue
+
         final_seen.add(key)
         final_rules.append(normalized_rule)
 
@@ -553,10 +559,14 @@ def dedupe_script_rules(rule_entries: List[Tuple[str, str]]) -> List[str]:
             continue
 
         old = best_by_identity[identity]
+
         if source_score > int(old["source_score"]):
             logger.info(
                 "Script 去重：保留更高优先级来源 | %s (%s) -> %s (%s)",
-                old["rule"], old["source_name"], normalized, source_name,
+                old["rule"],
+                old["source_name"],
+                normalized,
+                source_name,
             )
             best_by_identity[identity] = {
                 "rule": normalized,
@@ -576,6 +586,7 @@ def dedupe_mitm_hostnames(host_entries: List[Tuple[str, str]]) -> List[str]:
             continue
 
         source_score = get_source_priority(source_name)
+
         if canon not in best_by_host:
             best_by_host[canon] = {
                 "host": canon,
@@ -585,8 +596,14 @@ def dedupe_mitm_hostnames(host_entries: List[Tuple[str, str]]) -> List[str]:
             continue
 
         old = best_by_host[canon]
+
         if source_score > int(old["source_score"]):
-            logger.info("MITM 去重：保留更高优先级来源 | %s (%s -> %s)", canon, old["source_name"], source_name)
+            logger.info(
+                "MITM 去重：保留更高优先级来源 | %s (%s -> %s)",
+                canon,
+                old["source_name"],
+                source_name,
+            )
             best_by_host[canon] = {
                 "host": canon,
                 "source_name": source_name,
@@ -609,6 +626,7 @@ def build_plugin_text(
     sources = config["sources"]
 
     lines: List[str] = []
+
     lines.append(f"#!name={plugin_meta['name']}")
     lines.append(f"#!desc={plugin_meta['desc']}")
     lines.append(f"#!author={plugin_meta['author']}")
@@ -620,14 +638,17 @@ def build_plugin_text(
     lines.append("# 此文件由 GitHub Actions + Python 自动生成")
     lines.append("# 多源聚合、自动拉取、自动更新")
     lines.append("# 上游来源：")
+
     for item in sources:
         src_url = item.get("url", "")
         src_local = item.get("local_file", "")
+
         if src_local:
             lines.append(f"# - {item['name']}: local_file={src_local}")
         else:
             lines.append(f"# - {item['name']}: {src_url}")
-    lines.append("# 来源优先级：local-new-added > yfamilys-adlite > yfamilys-adblock > blackmatrix7-advertising")
+
+    lines.append("# 来源优先级：local-new-added > yfamilys-adlite > yfamilys-adblock > fmz200-blockads > blackmatrix7-advertising")
     lines.append("# ============================================")
     lines.append("")
 
@@ -655,8 +676,10 @@ def build_plugin_text(
 
 def write_text_if_changed(path: Path, content: str) -> bool:
     old_content = path.read_text(encoding="utf-8") if path.exists() else None
+
     if old_content == content:
         return False
+
     ensure_parent_dir(path)
     path.write_text(content, encoding="utf-8")
     return True
@@ -690,17 +713,21 @@ def main() -> int:
             continue
 
         logger.info("正在处理源 [%d/%d]: %s", idx, len(sources), name)
+
         if local_file:
             logger.info("本地文件: %s", local_file)
+
         if url:
             logger.info("下载地址: %s", url)
 
         text = get_source_text(source)
+
         if not text:
             logger.warning("源远程抓取失败且无可用缓存/本地文件，跳过: %s", name)
             continue
 
         parsed = parse_plugin_text(text, source_name=name, source_url=url)
+
         logger.info(
             "解析完成 | %s | URL Rewrite=%d, Script=%d, Rule=%d, MITM hostnames=%d, unknown=%d",
             name,
@@ -710,6 +737,7 @@ def main() -> int:
             len(parsed.mitm_hostnames),
             len(parsed.unknown_sections),
         )
+
         all_parsed.append(parsed)
 
     if not all_parsed:
@@ -731,7 +759,10 @@ def main() -> int:
 
     logger.info(
         "汇总完成 | 原始数量：URL Rewrite=%d, Script=%d, Rule=%d, MITM hostnames=%d",
-        len(raw_rewrite), len(raw_script), len(raw_rules), len(raw_mitm),
+        len(raw_rewrite),
+        len(raw_script),
+        len(raw_rules),
+        len(raw_mitm),
     )
 
     final_rewrite = dedupe_url_rewrite(raw_rewrite)
@@ -740,7 +771,10 @@ def main() -> int:
 
     logger.info(
         "去重完成 | 最终数量：URL Rewrite=%d, Script=%d, Rule=%d, MITM hostnames=%d",
-        len(final_rewrite), len(final_script), len(raw_rules), len(final_mitm),
+        len(final_rewrite),
+        len(final_script),
+        len(raw_rules),
+        len(final_mitm),
     )
 
     plugin_text = build_plugin_text(
@@ -752,6 +786,7 @@ def main() -> int:
     )
 
     changed = write_text_if_changed(output_path, plugin_text)
+
     if changed:
         logger.info("最终插件已生成/更新：%s", output_path)
         logger.info("检测到内容变化。")

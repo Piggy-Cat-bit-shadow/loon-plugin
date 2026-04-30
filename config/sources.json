@@ -6,7 +6,7 @@
     "homepage": "https://github.com/Piggy-Cat-bit-shadow/loon-merged-adblock",
     "icon_url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/source/avatar.jpg",
     "output": "dist/merged-adblock.plugin",
-    "include_script": false
+    "include_script": true
   },
   "sources": [
     {

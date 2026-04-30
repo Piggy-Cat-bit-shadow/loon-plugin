@@ -21,10 +21,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = BASE_DIR / "config" / "sources.json"
 
 SOURCE_PRIORITY = {
-    "local-new-added": 4,
-    "yfamilys-adlite": 3,
-    "yfamilys-adblock": 2,
-    "blackmatrix7-advertising": 1,
+
+    "local-new-added": 5,
+    "yfamilys-adlite": 4,
+    "yfamilys-adblock": 3,
+    "blackmatrix7-advertising": 2,
+    "fmz200-blockads": 1,
 }
 
 ACTION_PRIORITY = {

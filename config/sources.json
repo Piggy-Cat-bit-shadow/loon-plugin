@@ -27,6 +27,12 @@
       "cache": "cache/blackmatrix7-advertising.plugin"
     },
     {
+  "name": "fmz200-blockads",
+  "url": "https://raw.githubusercontent.com/fmz200/wool_scripts/main/Loon/plugin/blockAds.plugin",
+  "use_browser": false,
+  "cache": "cache/fmz200-blockads.plugin"
+    },
+    {
       "name": "local-new-added",
       "url": "",
       "local_file": "local/new-added.plugin",

@@ -3,7 +3,7 @@
 #!icon=https://raw.githubusercontent.com/deezertidal/private/main/icons/startingad.png
 #!homepage=https://yfamilys.com
 #!author=ddgksf2013
-# 由yfamilys.com自动维护 202604
+# 由yfamilys.com自动维护 202605
 [URL Rewrite]
 ^https?:\/\/2026.04.26/c412/v2.0.641 reject-200
 ^https?:\/\/ftapi\.10jqka\.com\.cn\/futgwapi\/api\/om\/v\d\/ad\/common\/transfer reject-200

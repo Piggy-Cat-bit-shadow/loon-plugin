@@ -57,7 +57,7 @@
     },
     {
       "name": "blackmatrix7-advertising",
-      "enabled": true,
+      "enabled": false,
       "priority": 1,
       "url": "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rewrite/Loon/Advertising/Advertising.plugin",
       "use_browser": false,
